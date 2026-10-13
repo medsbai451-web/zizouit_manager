@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import '../l10n/app_language.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -8,6 +10,9 @@ import 'package:flutter/services.dart';
 import '../domain/manager.dart' hide DataRow;
 import 'firebase_config.dart';
 import 'firebase_session.dart';
+import 'sign_in_screen.dart';
+import 'email_verification_screen.dart';
+export 'sign_in_screen.dart';
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key, required this.builder});
@@ -38,6 +43,10 @@ class _AuthGateState extends State<AuthGate> {
       error = null;
     });
     if (user == null) return;
+    if (!user.emailVerified) {
+      setState(() => loading = false);
+      return;
+    }
     FirebaseSession? candidate;
     try {
       final member = await FirebaseFirestore.instance
@@ -89,6 +98,24 @@ class _AuthGateState extends State<AuthGate> {
     if (session != null) return widget.builder(session!.manager, session!);
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return const SignInScreen();
+    if (!user.emailVerified) {
+      return EmailVerificationScreen(
+        email: user.email ?? '',
+        send: (language) async {
+          await FirebaseAuth.instance.setLanguageCode(
+            language == AppLanguage.french ? 'fr' : 'ar',
+          );
+          await user.sendEmailVerification();
+        },
+        refresh: () async {
+          await user.reload();
+          final refreshed = FirebaseAuth.instance.currentUser;
+          await refreshed?.getIdToken(true);
+          await load(refreshed);
+        },
+        signOut: FirebaseAuth.instance.signOut,
+      );
+    }
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -99,26 +126,27 @@ class _AuthGateState extends State<AuthGate> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
+                  const LanguagePicker(),
+                  AppText(
                     error ?? 'الحساب بانتظار التفعيل',
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 20),
-                  const Text('رقم الحساب باش المدير يعين الدور:'),
-                  SelectableText(user.uid),
+                  const AppText('رقم الحساب باش المدير يعين الدور:'),
+                  AppSelectableText(user.uid),
                   TextButton.icon(
                     onPressed: () =>
                         Clipboard.setData(ClipboardData(text: user.uid)),
                     icon: const Icon(Icons.copy),
-                    label: const Text('نسخ رقم الحساب'),
+                    label: const AppText('نسخ رقم الحساب'),
                   ),
                   FilledButton(
                     onPressed: () => load(user),
-                    child: const Text('عاود التحقق'),
+                    child: const AppText('عاود التحقق'),
                   ),
                   TextButton(
                     onPressed: () => FirebaseAuth.instance.signOut(),
-                    child: const Text('تسجيل الخروج'),
+                    child: const AppText('تسجيل الخروج'),
                   ),
                 ],
               ),
@@ -128,131 +156,4 @@ class _AuthGateState extends State<AuthGate> {
       ),
     );
   }
-}
-
-class SignInScreen extends StatefulWidget {
-  const SignInScreen({super.key});
-  @override
-  State<SignInScreen> createState() => _SignInScreenState();
-}
-
-class _SignInScreenState extends State<SignInScreen> {
-  final email = TextEditingController();
-  final password = TextEditingController();
-  final key = GlobalKey<FormState>();
-  bool busy = false;
-  String? error;
-  @override
-  void dispose() {
-    email.dispose();
-    password.dispose();
-    super.dispose();
-  }
-
-  Future<void> submit(bool signup) async {
-    if (!key.currentState!.validate()) return;
-    setState(() {
-      busy = true;
-      error = null;
-    });
-    try {
-      if (signup) {
-        await FirebaseAuth.instance.createUserWithEmailAndPassword(
-          email: email.text.trim(),
-          password: password.text,
-        );
-      } else {
-        await FirebaseAuth.instance.signInWithEmailAndPassword(
-          email: email.text.trim(),
-          password: password.text,
-        );
-      }
-    } on FirebaseAuthException catch (e) {
-      if (mounted) {
-        setState(() {
-          error = e.code == 'network-request-failed'
-              ? 'تحقق من الإنترنت'
-              : 'تعذر تسجيل الدخول أو إنشاء الحساب. تحقق من البريد وكلمة السر (${e.code}).';
-        });
-      }
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    body: SafeArea(
-      child: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 440),
-            child: Form(
-              key: key,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Icon(Icons.spa_outlined, size: 60),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'ZIZOUIT Manager',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'دخل بحسابك. الدور والصلاحيات كيعينهم المدير؛ ماشي اختيار من الجهاز.',
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 28),
-                  TextFormField(
-                    controller: email,
-                    enabled: !busy,
-                    keyboardType: TextInputType.emailAddress,
-                    autofillHints: const [AutofillHints.email],
-                    decoration: const InputDecoration(
-                      labelText: 'البريد الإلكتروني',
-                    ),
-                    validator: (v) =>
-                        v == null || !v.contains('@') ? 'دخل بريد صحيح' : null,
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: password,
-                    enabled: !busy,
-                    obscureText: true,
-                    autofillHints: const [AutofillHints.password],
-                    decoration: const InputDecoration(labelText: 'كلمة السر'),
-                    validator: (v) => v == null || v.length < 6
-                        ? 'كلمة السر خاصها 6 حروف على الأقل'
-                        : null,
-                  ),
-                  const SizedBox(height: 20),
-                  if (error != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Text(
-                        error!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
-                    ),
-                  FilledButton(
-                    onPressed: busy ? null : () => submit(false),
-                    child: Text(busy ? 'كنتحقق…' : 'تسجيل الدخول'),
-                  ),
-                  TextButton(
-                    onPressed: busy ? null : () => submit(true),
-                    child: const Text('إنشاء حساب — يحتاج تفعيل المدير'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    ),
-  );
 }

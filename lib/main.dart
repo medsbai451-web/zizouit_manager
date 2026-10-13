@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart' hide DataRow;
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart'
     show FirebaseFirestore, Settings;
 
@@ -10,12 +12,15 @@ import 'storage/storage.dart' as storage;
 import 'firebase/firebase_config.dart';
 import 'firebase/auth_gate.dart';
 import 'firebase/firebase_session.dart';
+import 'firebase/account_service.dart';
+import 'l10n/app_language.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (FirebaseConfig.enabled) {
     try {
       await Firebase.initializeApp(options: FirebaseConfig.options);
+      await AuthPersistence.firebase(FirebaseAuth.instance).initialize();
       FirebaseFirestore.instance.settings = const Settings(
         persistenceEnabled: false,
       );
@@ -54,54 +59,98 @@ const ink = Color(0xFF163E35);
 const accent = Color(0xFFB38339);
 const accounts = ['صندوق الورشة', 'صندوق المحل', 'البنك'];
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key, this.manager, this.startupError, this.homeOverride});
   final Manager? manager;
   final String? startupError;
   final Widget? homeOverride;
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'ZIZOUIT Manager',
-    debugShowCheckedModeBanner: false,
-    theme: ThemeData(
-      fontFamily: 'NotoNaskhArabic',
-      useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: ink,
-        primary: ink,
-        secondary: accent,
-      ),
-      scaffoldBackgroundColor: const Color(0xFFF6F7F3),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: Color(0xFFF6F7F3),
-        foregroundColor: ink,
-      ),
-      inputDecorationTheme: const InputDecorationTheme(
-        border: OutlineInputBorder(),
-        filled: true,
-        fillColor: Colors.white,
-      ),
-      cardTheme: const CardThemeData(
-        color: Colors.white,
-        elevation: 0,
-        margin: EdgeInsets.zero,
-      ),
-      filledButtonTheme: FilledButtonThemeData(
-        style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  final language = LanguageController();
+  late final Manager fallbackManager = Manager(save: (_) async {});
+  @override
+  void initState() {
+    super.initState();
+    language.load();
+  }
+
+  @override
+  void dispose() {
+    language.dispose();
+    fallbackManager.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => LanguageScope(
+    controller: language,
+    child: ListenableBuilder(
+      listenable: language,
+      builder: (context, _) => MaterialApp(
+        title: 'ZIZOUIT Manager',
+        debugShowCheckedModeBanner: false,
+        locale: language.value.locale,
+        supportedLocales: const [
+          Locale('ar', 'MA'),
+          Locale('ar'),
+          Locale('fr'),
+        ],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        theme: ThemeData(
+          fontFamily: language.value.rtl ? 'NotoNaskhArabic' : null,
+          useMaterial3: true,
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: ink,
+            primary: ink,
+            secondary: accent,
+          ),
+          scaffoldBackgroundColor: const Color(0xFFF6F7F3),
+          appBarTheme: const AppBarTheme(
+            backgroundColor: Color(0xFFF6F7F3),
+            foregroundColor: ink,
+          ),
+          inputDecorationTheme: const InputDecorationTheme(
+            border: OutlineInputBorder(),
+            filled: true,
+            fillColor: Colors.white,
+          ),
+          cardTheme: const CardThemeData(
+            color: Colors.white,
+            elevation: 0,
+            margin: EdgeInsets.zero,
+          ),
+          filledButtonTheme: FilledButtonThemeData(
+            style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
+          ),
+        ),
+        builder: (context, child) => Directionality(
+          textDirection: language.value.rtl
+              ? TextDirection.rtl
+              : TextDirection.ltr,
+          child: child!,
+        ),
+        home: widget.startupError != null
+            ? Scaffold(
+                body: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const LanguagePicker(),
+                        AppSelectableText(widget.startupError!),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+            : widget.homeOverride ??
+                  Home(manager: widget.manager ?? fallbackManager),
       ),
     ),
-    builder: (context, child) =>
-        Directionality(textDirection: TextDirection.rtl, child: child!),
-    home: startupError != null
-        ? Scaffold(
-            body: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: SelectableText(startupError!),
-              ),
-            ),
-          )
-        : homeOverride ?? Home(manager: manager ?? Manager(save: (_) async {})),
   );
 }
 
@@ -191,7 +240,7 @@ class _HomeState extends State<Home> {
   };
   String productName(String id) {
     final p = m.byId('products', id);
-    return '${p['name']} ${p['size']} · ${p['unit']}';
+    return '${p['name']} ${p['size']} · ${tr(context, p['unit'])}';
   }
 
   String lotLabel(DataRow lot) =>
@@ -268,14 +317,17 @@ class _HomeState extends State<Home> {
     try {
       await action();
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('تسجلات العملية بنجاح')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: AppText('تسجلات العملية بنجاح')),
+        );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade800),
+          SnackBar(
+            content: AppText('$e'),
+            backgroundColor: Colors.red.shade800,
+          ),
         );
       }
     }
@@ -303,7 +355,7 @@ class _HomeState extends State<Home> {
       barrierDismissible: false,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
-          title: Text(title),
+          title: AppText(title),
           content: SizedBox(
             width: 560,
             child: SingleChildScrollView(
@@ -316,7 +368,10 @@ class _HomeState extends State<Home> {
                     if (help != null)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 16),
-                        child: Text(help, style: const TextStyle(color: ink)),
+                        child: AppText(
+                          help,
+                          style: const TextStyle(color: ink),
+                        ),
                       ),
                     for (final s in specs)
                       Padding(
@@ -329,12 +384,14 @@ class _HomeState extends State<Home> {
                                     ? null
                                     : values[s.keyName],
                                 isExpanded: true,
-                                decoration: InputDecoration(labelText: s.label),
+                                decoration: InputDecoration(
+                                  label: AppText(s.label),
+                                ),
                                 items: [
                                   for (final entry in s.options!.entries)
                                     DropdownMenuItem(
                                       value: entry.key,
-                                      child: Text(
+                                      child: AppText(
                                         entry.value,
                                         overflow: TextOverflow.ellipsis,
                                       ),
@@ -347,14 +404,16 @@ class _HomeState extends State<Home> {
                                       },
                                 validator: (v) =>
                                     !s.optional && (v == null || v.isEmpty)
-                                    ? 'خاص اختيار'
+                                    ? tr(context, 'خاص اختيار')
                                     : null,
                               )
                             : TextFormField(
                                 initialValue: s.initial,
                                 minLines: s.lines,
                                 maxLines: s.lines,
-                                decoration: InputDecoration(labelText: s.label),
+                                decoration: InputDecoration(
+                                  label: AppText(s.label),
+                                ),
                                 keyboardType: s.numeric
                                     ? const TextInputType.numberWithOptions(
                                         decimal: true,
@@ -364,13 +423,13 @@ class _HomeState extends State<Home> {
                                 validator: (v) =>
                                     !s.optional &&
                                         (v == null || v.trim().isEmpty)
-                                    ? 'كمّل هاد الخانة'
+                                    ? tr(context, 'كمّل هاد الخانة')
                                     : null,
                                 enabled: !saving,
                               ),
                       ),
                     if (error != null)
-                      Text(
+                      AppText(
                         error!,
                         style: TextStyle(color: Colors.red.shade800),
                       ),
@@ -382,7 +441,7 @@ class _HomeState extends State<Home> {
           actions: [
             TextButton(
               onPressed: saving ? null : () => Navigator.pop(dialogContext),
-              child: const Text('إلغاء'),
+              child: const AppText('إلغاء'),
             ),
             FilledButton(
               onPressed: saving
@@ -399,7 +458,7 @@ class _HomeState extends State<Home> {
                         if (mounted) {
                           ScaffoldMessenger.of(this.context).showSnackBar(
                             const SnackBar(
-                              content: Text('تسجلات العملية بنجاح'),
+                              content: AppText('تسجلات العملية بنجاح'),
                             ),
                           );
                         }
@@ -412,7 +471,7 @@ class _HomeState extends State<Home> {
                         }
                       }
                     },
-              child: Text(saving ? 'كيتسجل…' : 'تأكيد وتسجيل'),
+              child: AppText(saving ? 'كيتسجل…' : 'تأكيد وتسجيل'),
             ),
           ],
         ),
@@ -429,12 +488,12 @@ class _HomeState extends State<Home> {
       ? OutlinedButton.icon(
           onPressed: m.busy || session?.processing == true ? null : action,
           icon: Icon(icon, size: 20),
-          label: Text(label),
+          label: AppText(label),
         )
       : FilledButton.icon(
           onPressed: m.busy || session?.processing == true ? null : action,
           icon: Icon(icon, size: 20),
-          label: Text(label),
+          label: AppText(label),
         );
   Widget actions(List<Widget> children) => Padding(
     padding: const EdgeInsets.only(bottom: 24),
@@ -452,7 +511,7 @@ class _HomeState extends State<Home> {
       children: [
         Icon(icon, color: ink),
         const SizedBox(width: 12),
-        Expanded(child: Text(text, style: const TextStyle(height: 1.6))),
+        Expanded(child: AppText(text, style: const TextStyle(height: 1.6))),
       ],
     ),
   );
@@ -463,7 +522,7 @@ class _HomeState extends State<Home> {
         children: [
           Icon(icon, size: 48, color: accent),
           const SizedBox(height: 16),
-          Text(
+          AppText(
             text,
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 18, color: ink),
@@ -495,7 +554,7 @@ class _HomeState extends State<Home> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    AppText(
                       title,
                       style: const TextStyle(
                         fontSize: 17,
@@ -504,7 +563,7 @@ class _HomeState extends State<Home> {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    Text(
+                    AppText(
                       subtitle,
                       style: TextStyle(
                         color: Colors.grey.shade700,
@@ -548,9 +607,9 @@ class _HomeState extends State<Home> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(v.key, style: const TextStyle(color: ink)),
+                    AppText(v.key, style: const TextStyle(color: ink)),
                     const SizedBox(height: 12),
-                    Text(
+                    AppText(
                       v.value,
                       style: const TextStyle(
                         fontSize: 25,
@@ -575,10 +634,10 @@ class _HomeState extends State<Home> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('الصلاحية تبدلات. خاص تسجيل الدخول من جديد.'),
+              const AppText('الصلاحية تبدلات. خاص تسجيل الدخول من جديد.'),
               TextButton(
                 onPressed: () => run(session!.signOut),
-                child: const Text('تسجيل الخروج'),
+                child: const AppText('تسجيل الخروج'),
               ),
             ],
           ),
@@ -594,7 +653,7 @@ class _HomeState extends State<Home> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
+              AppText(
                 'ZIZOUIT',
                 style: TextStyle(
                   fontSize: 26,
@@ -603,7 +662,7 @@ class _HomeState extends State<Home> {
                   color: Colors.white,
                 ),
               ),
-              Text(
+              AppText(
                 'تعاونية زيزويت ريف',
                 style: TextStyle(color: Color(0xFFC6D8CF)),
               ),
@@ -629,7 +688,7 @@ class _HomeState extends State<Home> {
                     textColor: const Color(0xFFC6D8CF),
                     iconColor: const Color(0xFFC6D8CF),
                     leading: Icon(sections[item]),
-                    title: Text(item),
+                    title: AppText(item),
                     onTap: () {
                       setState(() {
                         section = item;
@@ -644,7 +703,7 @@ class _HomeState extends State<Home> {
         ),
         Padding(
           padding: EdgeInsets.all(20),
-          child: Text(
+          child: AppText(
             session == null
                 ? 'نسخة محلية • بلا مزامنة\nالبيانات محفوظة فهاد الجهاز'
                 : 'Firebase • حساب ${m.actor}\nالعمليات كتتزامن مع التعاونية',
@@ -673,7 +732,7 @@ class _HomeState extends State<Home> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    AppText(
                       section,
                       style: const TextStyle(
                         fontSize: 26,
@@ -681,23 +740,24 @@ class _HomeState extends State<Home> {
                         color: ink,
                       ),
                     ),
-                    const Text(
+                    const AppText(
                       'خطوة بخطوة، كلشي مسجل',
                       style: TextStyle(color: Colors.black54),
                     ),
                   ],
                 ),
               ),
+              const LanguagePicker(),
               SizedBox(
                 width: 125,
                 child: m.authenticatedRole != null
-                    ? Text(m.actor, textAlign: TextAlign.center)
+                    ? AppText(m.actor, textAlign: TextAlign.center)
                     : DropdownButton<String>(
                         isExpanded: true,
                         value: m.actor,
                         items: [
                           for (final role in roles)
-                            DropdownMenuItem(value: role, child: Text(role)),
+                            DropdownMenuItem(value: role, child: AppText(role)),
                         ],
                         onChanged: m.busy
                             ? null
@@ -711,7 +771,7 @@ class _HomeState extends State<Home> {
               const SizedBox(width: 8),
               if (session != null)
                 IconButton(
-                  tooltip: 'تسجيل الخروج',
+                  tooltip: tr(context, 'تسجيل الخروج'),
                   onPressed: () => run(session!.signOut),
                   icon: const Icon(Icons.logout),
                 ),
@@ -829,7 +889,7 @@ class _HomeState extends State<Home> {
         Icons.spa_outlined,
       ),
     if (admin && m.upcoming.isNotEmpty) ...[
-      const Text(
+      const AppText(
         'الاستحقاقات الجاية والمتأخرة',
         style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: ink),
       ),
@@ -891,7 +951,7 @@ class _HomeState extends State<Home> {
         actions([button('زيد صنف', Icons.add, productForm)]),
       TextField(
         decoration: const InputDecoration(
-          labelText: 'قلب على الاسم، العائلة أو الحجم',
+          label: AppText('قلب على الاسم، العائلة أو الحجم'),
           prefixIcon: Icon(Icons.search),
         ),
         onChanged: (value) => setState(() => search = value),
@@ -980,7 +1040,7 @@ class _HomeState extends State<Home> {
       ]),
       TextField(
         decoration: const InputDecoration(
-          labelText: 'قلب على الصنف، LOT أو الموقع',
+          label: AppText('قلب على الصنف، LOT أو الموقع'),
           prefixIcon: Icon(Icons.search),
         ),
         onChanged: (value) => setState(() => search = value),
@@ -1050,7 +1110,7 @@ class _HomeState extends State<Home> {
           icon: Icons.inventory_2_outlined,
         ),
       if (admin) ...[
-        const Text(
+        const AppText(
           'آخر حركات المخزون',
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
         ),
@@ -1519,7 +1579,7 @@ class _HomeState extends State<Home> {
       'ثلاث فئات مستقلة. ديون الموردين كتجي من الشراء، وذمم الزبناء من البيع. الفرق بين المستحقات والالتزامات ماشي سيولة.',
     ),
     for (final category in debtCategories) ...[
-      Text(
+      AppText(
         category,
         style: const TextStyle(
           fontSize: 22,
@@ -1730,7 +1790,13 @@ class _HomeState extends State<Home> {
           button(
             'تقرير PDF',
             Icons.picture_as_pdf_outlined,
-            () => run(() => printReport('تقرير المعرض', eventReport(e))),
+            () => run(
+              () => printReport(
+                'تقرير المعرض',
+                eventReport(e),
+                language: LanguageScope.of(context).value,
+              ),
+            ),
             secondary: true,
           ),
         ],
@@ -1770,7 +1836,7 @@ class _HomeState extends State<Home> {
               () => eventExpense(c, true),
               secondary: true,
             ),
-          if (admin) Text('التكلفة المسجلة: ${money(eventCost(c['id']))}'),
+          if (admin) AppText('التكلفة المسجلة: ${money(eventCost(c['id']))}'),
         ],
       ),
   ]);
@@ -1805,7 +1871,13 @@ class _HomeState extends State<Home> {
         button(
           'تقرير PDF',
           Icons.picture_as_pdf_outlined,
-          () => run(() => printReport('تقرير زيزويت ريف', reportText())),
+          () => run(
+            () => printReport(
+              'تقرير زيزويت ريف',
+              reportText(),
+              language: LanguageScope.of(context).value,
+            ),
+          ),
         ),
         button(
           'نسخ تقرير',
@@ -1813,7 +1885,7 @@ class _HomeState extends State<Home> {
           () => showText('تقرير نشاط', reportText()),
         ),
       ]),
-      const Text(
+      const AppText(
         'تقويم الاستحقاقات',
         style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: ink),
       ),
@@ -1883,34 +1955,39 @@ class _HomeState extends State<Home> {
 
   String reportText() =>
       'تقرير زيزويت ريف — ${today()}\nالمبيعات المسلمة: ${money(m.revenue)}\nالسيولة المسجلة: ${money(m.liquidity)}\n${debtCategories.map((c) => '$c: أصل ${money(m.debtTotal(c, 'principal'))}، مؤدى ${money(m.debtTotal(c, 'paid'))}، باقي ${money(m.remaining(c))}').join('\n')}\nهذا تقرير محلي؛ الربح الصافي والزكاة غير معتمدين.\n${m.upcoming.map((d) => '${d['due']} ${d['party']}: ${money((d['amount'] as int) - (d['paid'] as int))}').join('\n')}';
-  Future<void> showText(String title, String text) => showDialog<void>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: Text(title),
-      content: SizedBox(
-        width: 650,
-        child: SingleChildScrollView(child: SelectableText(text)),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('إغلاق'),
+  Future<void> showText(String title, String text, {bool localize = true}) =>
+      showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: AppText(title),
+          content: SizedBox(
+            width: 650,
+            child: SingleChildScrollView(
+              child: AppSelectableText(text, localize: localize),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const AppText('إغلاق'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                await Clipboard.setData(
+                  ClipboardData(text: localize ? tr(context, text) : text),
+                );
+                if (context.mounted) {
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(const SnackBar(content: AppText('تنسخ النص')));
+                }
+              },
+              icon: const Icon(Icons.copy),
+              label: const AppText('نسخ'),
+            ),
+          ],
         ),
-        FilledButton.icon(
-          onPressed: () async {
-            await Clipboard.setData(ClipboardData(text: text));
-            if (context.mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text('تنسخ النص')));
-            }
-          },
-          icon: const Icon(Icons.copy),
-          label: const Text('نسخ'),
-        ),
-      ],
-    ),
-  );
+      );
   Widget settings() => stack([
     if (session != null) ...[
       notice(
@@ -1942,7 +2019,11 @@ class _HomeState extends State<Home> {
       button(
         'نسخة احتياطية JSON',
         Icons.copy_outlined,
-        () => showText('نسخة احتياطية — احفظ النص في ملف آمن', m.export()),
+        () => showText(
+          'نسخة احتياطية — احفظ النص في ملف آمن',
+          m.export(),
+          localize: false,
+        ),
       ),
       button(
         'استرجاع نسخة',
@@ -1965,14 +2046,14 @@ class _HomeState extends State<Home> {
         secondary: true,
       ),
     ]),
-    const Text(
+    const AppText(
       'قرارات باقية',
       style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: ink),
     ),
     notice(
       'منهج تقييم المخزون • ملكية التعاونية وحصص الأعضاء • أجور وساعات العاملات • دور لقمان واعتماده • الميزانية والاستضافة • الحول الزكوي. لقمان هنا عرض فقط، ووئام مستبعدة حسب المرجع.',
     ),
-    const Text(
+    const AppText(
       'سجل التدقيق المحلي',
       style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: ink),
     ),

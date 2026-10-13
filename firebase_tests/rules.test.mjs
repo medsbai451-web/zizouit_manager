@@ -6,7 +6,7 @@ import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, serv
 let env;
 const roles = { admin: 'المدير', production: 'نجاة', sales: 'سلمى', marketing: 'حسن', reviewer: 'لقمان' };
 const path = name => `workspaces/zizouit/${name}`;
-const db = uid => env.authenticatedContext(uid).firestore();
+const db = uid => env.authenticatedContext(uid, {email_verified:true}).firestore();
 const command = uid => ({uid,kind:uid === 'sales' ? 'sale' : 'produceFromRecipe',arguments:{recipeId:'Z1',output:4},status:'pending',created:serverTimestamp()});
 before(async () => {
   env = await initializeTestEnvironment({projectId:'demo-zizouit-manager',firestore:{host:'127.0.0.1',port:8085,rules:readFileSync(new URL('../firestore.rules',import.meta.url),'utf8')}});
@@ -28,6 +28,19 @@ test('Unauthenticated and unassigned users cannot read either dataset', async ()
     await assertFails(getDoc(doc(store,path('state/public'))));
     await assertFails(getDoc(doc(store,path('state/private'))));
   }
+});
+test('An unverified account cannot use assigned admin or staff permissions', async () => {
+  for (const uid of ['admin','sales']) {
+    const store = env.authenticatedContext(uid, {email_verified:false}).firestore();
+    await assertFails(getDoc(doc(store,path('state/public'))));
+    await assertFails(getDoc(doc(store,path('state/private'))));
+    await assertFails(getDoc(doc(store,path(`members/${uid}`))));
+  }
+});
+test('Matching the owner email never grants an unassigned UID administrator access', async () => {
+  const store = env.authenticatedContext('outsider', {email:'medsbai451@gmail.com',email_verified:true}).firestore();
+  await assertFails(getDoc(doc(store,path('state/private'))));
+  await assertFails(setDoc(doc(store,path('members/outsider')),{role:'المدير',active:true}));
 });
 test('Only the admin reads money/debts; staff read sanitized public data', async () => {
   await assertSucceeds(getDoc(doc(db('admin'),path('state/private'))));
