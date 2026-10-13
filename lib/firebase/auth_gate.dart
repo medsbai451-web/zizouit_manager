@@ -47,8 +47,9 @@ class _AuthGateState extends State<AuthGate> {
           .doc(user.uid)
           .get(const GetOptions(source: Source.server));
       final role = member.data()?['role'];
-      if (member.data()?['active'] != true || !roles.contains(role))
+      if (member.data()?['active'] != true || !roles.contains(role)) {
         throw StateError('حسابك بانتظار تفعيل المدير وتعيين الدور.');
+      }
       candidate = FirebaseSession(user: user, role: role as String);
       await candidate.start();
       if (!mounted || current != generation) {
@@ -61,13 +62,14 @@ class _AuthGateState extends State<AuthGate> {
       });
     } catch (e) {
       await candidate?.stop();
-      if (mounted && current == generation)
+      if (mounted && current == generation) {
         setState(() {
           error = e is StateError
               ? e.message.toString()
               : 'تعذر التحقق من الحساب. تحقق من الإنترنت وإعداد Firebase.';
           loading = false;
         });
+      }
     }
   }
 
@@ -81,8 +83,9 @@ class _AuthGateState extends State<AuthGate> {
 
   @override
   Widget build(BuildContext context) {
-    if (loading)
+    if (loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
     if (session != null) return widget.builder(session!.manager, session!);
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return const SignInScreen();
@@ -165,12 +168,13 @@ class _SignInScreenState extends State<SignInScreen> {
         );
       }
     } on FirebaseAuthException catch (e) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           error = e.code == 'network-request-failed'
               ? 'تحقق من الإنترنت'
               : 'تعذر تسجيل الدخول أو إنشاء الحساب. تحقق من البريد وكلمة السر (${e.code}).';
         });
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }

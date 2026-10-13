@@ -65,5 +65,7 @@ app.*.map.json
 /firebase_config.json
 **/*service-account*.json
 **/*serviceAccount*.json
+**/*firebase-adminsdk*.json
+/.firebase/
 /.tools/
 /firebase_tests/node_modules/

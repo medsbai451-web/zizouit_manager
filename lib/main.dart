@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart' hide DataRow;
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:cloud_firestore/cloud_firestore.dart' show FirebaseFirestore, Settings;
+import 'package:cloud_firestore/cloud_firestore.dart'
+    show FirebaseFirestore, Settings;
 
 import 'domain/manager.dart';
 import 'reports/pdf_report.dart';
@@ -568,7 +569,7 @@ class _HomeState extends State<Home> {
 
   @override
   Widget build(BuildContext context) {
-    if (session?.revoked == true)
+    if (session?.revoked == true) {
       return Scaffold(
         body: Center(
           child: Column(
@@ -583,6 +584,7 @@ class _HomeState extends State<Home> {
           ),
         ),
       );
+    }
     final wide = MediaQuery.sizeOf(context).width >= 1000;
     final nav = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -929,7 +931,8 @@ class _HomeState extends State<Home> {
       v['cost']!.isEmpty ? null : cents(v['cost']!),
       v['expiry']!,
     ),
-    help: 'خلي التكلفة فارغة إلا ما عندكش وثيقة مؤكدة. الجرد كيضيف مخزون؛ ماشي شراء ولا سيولة.',
+    help:
+        'خلي التكلفة فارغة إلا ما عندكش وثيقة مؤكدة. الجرد كيضيف مخزون؛ ماشي شراء ولا سيولة.',
   );
   void transferForm() => form(
     'صيفطت السلعة',
@@ -947,7 +950,8 @@ class _HomeState extends State<Home> {
       ),
     ],
     (v) => m.transfer(v['lot']!, quantity(v['quantity']!), v['destination']!),
-    help: 'غير الكمية المرسلة كتخرج من المصدر. المخزون فالوجهة ما كيزيد حتى يتأكد الاستلام.',
+    help:
+        'غير الكمية المرسلة كتخرج من المصدر. المخزون فالوجهة ما كيزيد حتى يتأكد الاستلام.',
   );
   Widget inventory() {
     final lots = m
@@ -1102,7 +1106,8 @@ class _HomeState extends State<Home> {
       batch: v['batch']!,
       expiry: v['expiry']!,
     ),
-    help: 'سجل المورد من لوحته أولاً. نجاة كتأكد الكمية، والمدير كيأكد التكلفة. الثمن المجهول يبقى غير مؤكد. الفاتورة المؤجلة كتزيد المخزون والدين بلا خروج نقدي. النقل هنا جزء من التكلفة؛ ما تسجلوش مرة أخرى كمصروف.',
+    help:
+        'سجل المورد من لوحته أولاً. نجاة كتأكد الكمية، والمدير كيأكد التكلفة. الثمن المجهول يبقى غير مؤكد. الفاتورة المؤجلة كتزيد المخزون والدين بلا خروج نقدي. النقل هنا جزء من التكلفة؛ ما تسجلوش مرة أخرى كمصروف.',
   );
   Widget purchases() => stack([
     actions([button('تسلمت السلعة', Icons.add, purchaseForm)]),
@@ -1146,7 +1151,8 @@ class _HomeState extends State<Home> {
                   v['reason']!,
                   v['account']!,
                 ),
-                help: 'كيخصم من الدفعة الأصلية فالورشة وكيخفض الدين أولاً. استرداد ثمن السلعة فقط؛ النقل ما نفترضوش يرجع. الجدولة السابقة كتتلغى لإعادة اعتماد الرصيد.',
+                help:
+                    'كيخصم من الدفعة الأصلية فالورشة وكيخفض الدين أولاً. استرداد ثمن السلعة فقط؛ النقل ما نفترضوش يرجع. الجدولة السابقة كتتلغى لإعادة اعتماد الرصيد.',
               ),
               secondary: true,
             ),
@@ -1212,7 +1218,8 @@ class _HomeState extends State<Home> {
         activity: v['activity']!,
         estimated: v['estimated'] == 'مقدرة',
       ),
-      help: 'الكمية الأولى هي الناتج الصالح الفعلي. دخل استهلاك كل مادة، بما فيها التغليف؛ خلي غير المستعمل فارغ. الناتج كامل كيدخل للورشة. الأجور هنا توزيع للتكلفة فقط؛ الأداء النقدي من المالية. ما نفترضوش مردودية ثابتة للعصر.',
+      help:
+          'الكمية الأولى هي الناتج الصالح الفعلي. دخل استهلاك كل مادة، بما فيها التغليف؛ خلي غير المستعمل فارغ. الناتج كامل كيدخل للورشة. الأجور هنا توزيع للتكلفة فقط؛ الأداء النقدي من المالية. ما نفترضوش مردودية ثابتة للعصر.',
     );
   }
 
@@ -1271,8 +1278,9 @@ class _HomeState extends State<Home> {
               'quantity': quantity(v['ingredient_${p['id']}']!),
             },
       ];
-      if (ingredients.isEmpty)
+      if (ingredients.isEmpty) {
         throw RuleViolation('حدد المادة السائبة ومواد العبوة المطلوبة');
+      }
       return m.recipe(
         v['name']!,
         v['product']!,
@@ -1283,7 +1291,8 @@ class _HomeState extends State<Home> {
         ingredients: ingredients,
       );
     },
-    help: 'عرف المادة السائبة والعبوات كأصناف مستقلة. مثال لكل قرعة عسل 250غ: 0.25 كلغ عسل سائب + 1 قرعة + 1 غطاء + 1 ملصق. المقادير بوحدة كل صنف؛ ما كنبدلوش الوحدات بالتخمين.',
+    help:
+        'عرف المادة السائبة والعبوات كأصناف مستقلة. مثال لكل قرعة عسل 250غ: 0.25 كلغ عسل سائب + 1 قرعة + 1 غطاء + 1 ملصق. المقادير بوحدة كل صنف؛ ما كنبدلوش الوحدات بالتخمين.',
   );
   void conversionForm(DataRow recipe) => form(
     'عبأت: ${recipe['name']}',
@@ -1367,7 +1376,8 @@ class _HomeState extends State<Home> {
       campaign: v['campaign']!,
       exhibition: v['exhibition']!,
     ),
-    help: 'البيع كيخصم من الدفعة المختارة فقط. الحجز كيحفظ الكمية بلا تسجيل مبيعات أو تحصيل حتى التسليم. التكلفة المجهولة ما كتولدش ربح وهمي.',
+    help:
+        'البيع كيخصم من الدفعة المختارة فقط. الحجز كيحفظ الكمية بلا تسجيل مبيعات أو تحصيل حتى التسليم. التكلفة المجهولة ما كتولدش ربح وهمي.',
   );
   Widget sales() => stack([
     actions([button('بعت', Icons.add, saleForm)]),
@@ -1433,7 +1443,8 @@ class _HomeState extends State<Home> {
                   v['reason']!,
                   v['account']!,
                 ),
-                help: 'كيتم تخفيض ذمة الزبون أولاً، والباقي كيرجع من الحساب المختار. الكمية كترجع للموقع الأصلي.',
+                help:
+                    'كيتم تخفيض ذمة الزبون أولاً، والباقي كيرجع من الحساب المختار. الكمية كترجع للموقع الأصلي.',
               ),
               secondary: true,
             ),
@@ -1499,7 +1510,8 @@ class _HomeState extends State<Home> {
             v['due']!,
             v['reason']!,
           ),
-          help: 'سجل فقط الرصيد الموثق عند بداية التتبع، واشرح أصل الدين والأداء السابق فالمرجع. الأداء المسجل هنا كيتبع الفترة الحالية.',
+          help:
+              'سجل فقط الرصيد الموثق عند بداية التتبع، واشرح أصل الدين والأداء السابق فالمرجع. الأداء المسجل هنا كيتبع الفترة الحالية.',
         ),
       ),
     ]),
@@ -1612,7 +1624,8 @@ class _HomeState extends State<Home> {
             v['kind']!,
             v['reason']!,
           ),
-          help: 'التمويل والسحب الشخصي منفصلان عن المصروف. أداء دين المورد أو تحصيل الزبون من لوحة الديون. الأجور تحتاج سجل فترة لتجنب التكرار؛ لا تدخل الأجر نفسه مرتين.',
+          help:
+              'التمويل والسحب الشخصي منفصلان عن المصروف. أداء دين المورد أو تحصيل الزبون من لوحة الديون. الأجور تحتاج سجل فترة لتجنب التكرار؛ لا تدخل الأجر نفسه مرتين.',
         ),
       ),
       button(
@@ -1642,7 +1655,8 @@ class _HomeState extends State<Home> {
             cents(v['amount']!),
             v['account']!,
           ),
-          help: 'أجر حسن المرجعي 1000 د.م. كنمنعو تكرار نفس الشخص ونفس الشهر. باقي الأجور خاصها اتفاق مؤكد.',
+          help:
+              'أجر حسن المرجعي 1000 د.م. كنمنعو تكرار نفس الشخص ونفس الشهر. باقي الأجور خاصها اتفاق مؤكد.',
         ),
         secondary: true,
       ),
@@ -1842,7 +1856,8 @@ class _HomeState extends State<Home> {
       v['reason']!,
       reference: record['id'],
     ),
-    help: 'ربط بالملف وخروج نقدي مرة وحدة. ما تدخلش نفس الأداء فالمالية مرة أخرى.',
+    help:
+        'ربط بالملف وخروج نقدي مرة وحدة. ما تدخلش نفس الأداء فالمالية مرة أخرى.',
   );
   String eventReport(DataRow event) {
     final sales = m
@@ -1885,8 +1900,9 @@ class _HomeState extends State<Home> {
           onPressed: () async {
             await Clipboard.setData(ClipboardData(text: text));
             if (context.mounted) {
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(const SnackBar(content: Text('تنسخ النص')));
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text('تنسخ النص')));
             }
           },
           icon: const Icon(Icons.copy),
@@ -1943,7 +1959,8 @@ class _HomeState extends State<Home> {
             }
             return m.restore(v['json']!);
           },
-          help: 'كتستبدل البيانات المحلية بالنسخة المختارة. خذ نسخة احتياطية من البيانات الحالية قبل التأكيد.',
+          help:
+              'كتستبدل البيانات المحلية بالنسخة المختارة. خذ نسخة احتياطية من البيانات الحالية قبل التأكيد.',
         ),
         secondary: true,
       ),

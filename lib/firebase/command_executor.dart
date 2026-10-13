@@ -1,13 +1,16 @@
+import 'dart:convert';
 import '../domain/manager.dart';
 
 Future<void> replayCommand(Manager m, DataRow command) async {
   final a = command['arguments'];
-  if (a is! Map<String, dynamic>)
+  if (a is! Map<String, dynamic>) {
     throw RuleViolation('معطيات العملية غير صالحة');
+  }
   double n(String key) {
     final value = a[key];
-    if (value is! num || !value.isFinite)
+    if (value is! num || !value.isFinite) {
       throw RuleViolation('قيمة غير صالحة: $key');
+    }
     return value.toDouble();
   }
 
@@ -62,6 +65,10 @@ Future<void> replayCommand(Manager m, DataRow command) async {
         estimated: b('estimated'),
       );
     case 'produceFromRecipe':
+      if (jsonEncode(m.byId('recipes', s('recipeId'))) !=
+          jsonEncode(a['recipe'])) {
+        throw RuleViolation('الوصفة تبدلات؛ راجع المقادير وعاود العملية');
+      }
       await m.produceFromRecipe(
         recipeId: s('recipeId'),
         output: n('output'),

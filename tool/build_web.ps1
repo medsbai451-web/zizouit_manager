@@ -1,8 +1,12 @@
-param([string]$Flutter = 'flutter')
+param([string]$Flutter = 'flutter', [string]$FirebaseConfig = '')
 $ErrorActionPreference = 'Stop'
 Push-Location (Join-Path $PSScriptRoot '..')
 try {
-    & $Flutter build web --no-pub --no-web-resources-cdn
+    if ($FirebaseConfig) {
+        & $Flutter build web --no-pub --no-web-resources-cdn "--dart-define-from-file=$FirebaseConfig"
+    } else {
+        & $Flutter build web --no-pub --no-web-resources-cdn
+    }
     if ($LASTEXITCODE -ne 0) { throw 'Flutter web build failed' }
     $flutterCommand = Get-Command $Flutter -ErrorAction Stop
     $dartPath = Join-Path (Split-Path $flutterCommand.Source) 'cache/dart-sdk/bin/dart.exe'

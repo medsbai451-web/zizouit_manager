@@ -50,13 +50,15 @@ class FirebaseSession extends ChangeNotifier {
         .collection('members')
         .doc(user.uid)
         .get(const GetOptions(source: Source.server));
-    if (member.data()?['role'] != role || member.data()?['active'] != true)
+    if (member.data()?['role'] != role || member.data()?['active'] != true) {
       throw RuleViolation('الحساب ما عندوش صلاحية فهاد التعاونية');
+    }
     final prefs = SharedPreferencesAsync();
     final queued = await prefs.getString(outboxKey);
     if (queued != null) outbox = (jsonDecode(queued) as List).cast<DataRow>();
-    final remote = await state(admin ? 'private' : 'public')
-        .get(const GetOptions(source: Source.server));
+    final remote = await state(
+      admin ? 'private' : 'public',
+    ).get(const GetOptions(source: Source.server));
     canonical =
         remote.data()?['json'] as String? ??
         jsonEncode(Manager(save: (_) async {}).data);
@@ -103,8 +105,9 @@ class FirebaseSession extends ChangeNotifier {
         }
       },
       onError: (Object error) {
-        if (error is FirebaseException && error.code == 'permission-denied')
+        if (error is FirebaseException && error.code == 'permission-denied') {
           revoked = true;
+        }
         status = 'تعذرت المزامنة؛ تحقق من الاتصال والصلاحيات';
         notifyListeners();
       },
@@ -141,12 +144,17 @@ class FirebaseSession extends ChangeNotifier {
   }
 
   Future<void> save(String json) async {
-    if (closed || revoked)
+    if (closed || revoked) {
       throw RuleViolation('الجلسة تسدات أو الصلاحية تبدلات');
-    if (processing)
+    }
+    if (processing) {
       throw RuleViolation('تسنى حتى تتعالج العمليات الجاية من الأجهزة');
+    }
     if (admin) {
-      Manager.decode(json);
+      final snapshot = Manager.decode(json);
+      final audit = (snapshot['audit'] as List).cast<DataRow>();
+      if (audit.isNotEmpty) audit.last['uid'] = user.uid;
+      json = jsonEncode(snapshot);
       checkSize(json);
       final expected = revision;
       writing = true;
@@ -156,18 +164,21 @@ class FirebaseSession extends ChangeNotifier {
             workspace.collection('members').doc(user.uid),
           );
           if (member.data()?['role'] != 'المدير' ||
-              member.data()?['active'] != true)
+              member.data()?['active'] != true) {
             throw RuleViolation('صلاحية المدير تبدلات');
+          }
           final current = await tx.get(state('private'));
           final actual = (current.data()?['revision'] as num?)?.toInt() ?? 0;
-          if (actual != expected)
+          if (actual != expected) {
             throw RuleViolation(
               'جهاز آخر بدل البيانات؛ حدث المعطيات وعاود العملية',
             );
+          }
           writeState(tx, json, actual + 1);
         }, maxAttempts: 3);
         canonical = json;
         revision = expected + 1;
+        manager.applyRemote(json);
         status = 'المعطيات متزامنة';
       } finally {
         writing = false;
@@ -180,10 +191,12 @@ class FirebaseSession extends ChangeNotifier {
       }
     } else {
       final command = manager.currentCommand;
-      if (command == null)
+      if (command == null) {
         throw RuleViolation('هاد العملية ما مدعماش المزامنة لهاذ الدور');
-      if (utf8.encode(jsonEncode(command)).length > 100000)
+      }
+      if (utf8.encode(jsonEncode(command)).length > 100000) {
         throw RuleViolation('العملية كبيرة؛ قسمها لدفعات');
+      }
       final entry = <String, dynamic>{
         'id':
             '${DateTime.now().microsecondsSinceEpoch}_${Random.secure().nextInt(1 << 32)}',
@@ -201,10 +214,11 @@ class FirebaseSession extends ChangeNotifier {
   }
 
   void checkSize(String json) {
-    if (utf8.encode(json).length > 750000)
+    if (utf8.encode(json).length > 750000) {
       throw RuleViolation(
         'البيانات تجاوزت حجم النسخة الحالية؛ خاص ترقية تخزين الخادم قبل المتابعة',
       );
+    }
   }
 
   void writeState(Transaction tx, String json, int next) {
@@ -216,8 +230,9 @@ class FirebaseSession extends ChangeNotifier {
 
   Future<void> refresh() async {
     if (manager.busy || writing || closed) return;
-    final remote = await state(admin ? 'private' : 'public')
-        .get(const GetOptions(source: Source.server));
+    final remote = await state(
+      admin ? 'private' : 'public',
+    ).get(const GetOptions(source: Source.server));
     if (remote.data() == null) return;
     canonical = remote.data()!['json'] as String;
     revision = (remote.data()!['revision'] as num).toInt();
@@ -278,8 +293,9 @@ class FirebaseSession extends ChangeNotifier {
               final current = await tx.get(state('private'));
               final role = member.data()?['role'];
               try {
-                if (member.data()?['active'] != true || !roles.contains(role))
+                if (member.data()?['active'] != true || !roles.contains(role)) {
                   throw RuleViolation('الحساب غير مفعل');
+                }
                 final initial =
                     current.data()?['json'] as String? ??
                     jsonEncode(Manager(save: (_) async {}).data);
@@ -291,7 +307,15 @@ class FirebaseSession extends ChangeNotifier {
                   initial: initial,
                   authenticatedRole: role as String,
                 );
-                await replayCommand(processor, payload);
+                try {
+                  await replayCommand(processor, payload);
+                } catch (error) {
+                  throw RuleViolation(
+                    error is RuleViolation
+                        ? error.message
+                        : 'معطيات العملية غير صالحة',
+                  );
+                }
                 if (result == null) throw RuleViolation('العملية غير صالحة');
                 final audit = processor.rows('audit').last;
                 audit['uid'] = payload['uid'];
@@ -334,8 +358,9 @@ class FirebaseSession extends ChangeNotifier {
   }
 
   Future<void> setMember(String uid, String assignedRole) async {
-    if (!admin || !roles.contains(assignedRole) || uid.trim().isEmpty)
+    if (!admin || !roles.contains(assignedRole) || uid.trim().isEmpty) {
       throw RuleViolation('صلاحية غير صالحة');
+    }
     await workspace.collection('members').doc(uid.trim()).set({
       'role': assignedRole,
       'active': true,
@@ -343,8 +368,9 @@ class FirebaseSession extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
-    if (manager.busy || writing || processing)
+    if (manager.busy || writing || processing) {
       throw RuleViolation('تسنى حتى تسالي العملية الحالية');
+    }
     await stop();
     try {
       await storage.removeData(scope);

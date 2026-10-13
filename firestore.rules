@@ -32,7 +32,7 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['json','revision','updated'])
         && request.resource.data.json is string && request.resource.data.json.size() <= 750000
         && request.resource.data.revision is int
-        && request.resource.data.revision == (resource == null ? 1 : resource.data.revision + 1)
+        && request.resource.data.revision == (!exists(/databases/$(database)/documents/workspaces/$(workspace)/state/$(visibility)) ? 1 : resource.data.revision + 1)
         && request.resource.data.updated == request.time
         && getAfter(/databases/$(database)/documents/workspaces/$(workspace)/state/public).data.revision
           == getAfter(/databases/$(database)/documents/workspaces/$(workspace)/state/private).data.revision;

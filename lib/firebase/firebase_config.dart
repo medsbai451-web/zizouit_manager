@@ -9,7 +9,13 @@ class FirebaseConfig {
   );
   static FirebaseOptions get options {
     const project = String.fromEnvironment('FIREBASE_PROJECT_ID');
-    const apiKey = String.fromEnvironment('FIREBASE_API_KEY');
+    const fallbackKey = String.fromEnvironment('FIREBASE_API_KEY');
+    final platformKey = kIsWeb
+        ? const String.fromEnvironment('FIREBASE_WEB_API_KEY')
+        : defaultTargetPlatform == TargetPlatform.android
+        ? const String.fromEnvironment('FIREBASE_ANDROID_API_KEY')
+        : const String.fromEnvironment('FIREBASE_IOS_API_KEY');
+    final apiKey = platformKey.isEmpty ? fallbackKey : platformKey;
     const sender = String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID');
     final appId = kIsWeb
         ? const String.fromEnvironment('FIREBASE_WEB_APP_ID')
