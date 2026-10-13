@@ -48,11 +48,34 @@ String money(num value) => '${(value / 100).toStringAsFixed(2)} د.م.';
 String today() => DateTime.now().toIso8601String().substring(0, 10);
 
 class Manager extends ChangeNotifier {
-  Manager({required this.save, String? initial}) {
+  Manager({required this.save, String? initial, this.authenticatedRole}) {
+    if (authenticatedRole != null) _actor = authenticatedRole!;
     if (initial != null) data = decode(initial);
   }
   final SaveData save;
-  String actor = 'المدير';
+  final String? authenticatedRole;
+  String _actor = 'المدير';
+  String get actor => _actor;
+  set actor(String value) {
+    if (authenticatedRole != null && value != authenticatedRole) {
+      throw RuleViolation('الدور مرتبط بالحساب؛ ما يمكنش تبدلو من الجهاز');
+    }
+    if (!roles.contains(value)) throw RuleViolation('دور غير صالح');
+    _actor = value;
+  }
+
+  DataRow? currentCommand;
+  void describeCommand(String kind, DataRow arguments) {
+    currentCommand = jsonDecode(
+      jsonEncode({'kind': kind, 'arguments': arguments}),
+    ) as DataRow;
+  }
+
+  void applyRemote(String snapshot) {
+    data = decode(snapshot);
+    notifyListeners();
+  }
+
   bool busy = false;
   DataRow data = {
     'version': 1,
@@ -93,6 +116,7 @@ class Manager extends ChangeNotifier {
       }
     }
     validateSnapshot(decoded);
+    validateRecipes(decoded);
     return decoded;
   }
 
@@ -245,6 +269,17 @@ class Manager extends ChangeNotifier {
     }
   }
 
+  static void validateRecipes(DataRow snapshot) {
+    final products = (snapshot['products'] as List).cast<DataRow>().map((p)=>p['id']).toSet();
+    for (final recipe in (snapshot['recipes'] as List).cast<DataRow>()) {
+      if (recipe['ingredients'] == null) continue;
+      if (recipe['ingredients'] is! List || recipe['outputQuantity'] is! num || !(recipe['outputQuantity'] as num).isFinite || recipe['outputQuantity'] <= 0) throw RuleViolation('وصفة غير صالحة');
+      final seen = <String>{};
+      for (final ingredient in recipe['ingredients']) {
+        if (ingredient is! Map || ingredient['product'] is! String || !products.contains(ingredient['product']) || ingredient['product'] == recipe['product'] || !seen.add(ingredient['product']) || ingredient['quantity'] is! num || !(ingredient['quantity'] as num).isFinite || ingredient['quantity'] <= 0) throw RuleViolation('مادة وصفة غير صالحة');
+      }
+    }
+  }
   List<DataRow> rows(String table) => (data[table] as List).cast<DataRow>();
   DataRow byId(String table, String id) => rows(table).firstWhere(
     (r) => r['id'] == id,
@@ -288,6 +323,7 @@ class Manager extends ChangeNotifier {
       return;
     }
     busy = true;
+    currentCommand = null;
     final before = jsonEncode(data);
     try {
       action();
@@ -441,6 +477,13 @@ class Manager extends ChangeNotifier {
     String unit,
     String flow,
   ) => commit('product', 'تعريف صنف: $name', () {
+    describeCommand('product', {
+      'name': name,
+      'family': family,
+      'size': size,
+      'unit': unit,
+      'flow': flow,
+    });
     requiredText(name);
     requiredText(unit);
     if (rows('products')
@@ -503,6 +546,21 @@ class Manager extends ChangeNotifier {
     required String expiry,
     String? commandId,
   }) => commit('purchase', 'استلام شراء: $invoice', () {
+    describeCommand('purchase', {
+      'productId': productId,
+      'amount': amount,
+      'supplierId': supplierId,
+      'invoice': invoice,
+      'ordered': ordered,
+      'received': received,
+      'due': due,
+      'unitCost': unitCost,
+      'transport': transport,
+      'paid': paid,
+      'account': account,
+      'batch': batch,
+      'expiry': expiry,
+    });
     positive(amount);
     requiredText(invoice);
     date(ordered);
@@ -727,7 +785,30 @@ class Manager extends ChangeNotifier {
     required int overhead,
     required String activity,
     required bool estimated,
+    DataRow? recipeSnapshot,
+    DataRow? commandOverride,
   }) => commit('production', 'إنتاج: $batch', () {
+    if (commandOverride != null) {
+      describeCommand(
+        commandOverride['kind'] as String,
+        commandOverride['arguments'] as DataRow,
+      );
+    } else {
+      describeCommand('produce', {
+        'inputs': inputs,
+        'productId': productId,
+        'output': output,
+        'batch': batch,
+        'expiry': expiry,
+        'workers': workers,
+        'hours': hours,
+        'waste': waste,
+        'labor': labor,
+        'overhead': overhead,
+        'activity': activity,
+        'estimated': estimated,
+      });
+    }
     positive(output);
     positive(hours);
     nonnegative(waste);
@@ -780,10 +861,16 @@ class Manager extends ChangeNotifier {
       'estimated': isEstimated,
       'activity': activity,
       'date': today(),
+      if (recipeSnapshot != null) 'recipe': recipeSnapshot,
     });
   });
   Future<void> transfer(String lotId, double amount, String destination) =>
       commit('transfer', 'صيفطت: $destination', () {
+        describeCommand('transfer', {
+          'lotId': lotId,
+          'amount': amount,
+          'destination': destination,
+        });
         final lot = byId('lots', lotId);
         available(lot, amount);
         requiredText(destination);
@@ -822,6 +909,11 @@ class Manager extends ChangeNotifier {
     returnToSource ? 'إرجاع شحنة' : 'تسلمت السلعة',
     () {
       final shipment = byId('lots', shipmentId);
+      describeCommand('receive', {
+        'shipmentId': shipmentId,
+        'amount': amount,
+        'returnToSource': returnToSource,
+      });
       if (shipment['shipment'] != true) {
         throw RuleViolation('السجل ماشي شحنة مفتوحة');
       }
@@ -865,6 +957,21 @@ class Manager extends ChangeNotifier {
     bool reserve = false,
     String? commandId,
   }) => commit('sale', reserve ? 'حجز طلبية' : 'بيع: $customer', () {
+    describeCommand('sale', {
+      'lotId': lotId,
+      'amount': amount,
+      'unitPrice': unitPrice,
+      'customer': customer,
+      'channel': channel,
+      'discovery': discovery,
+      'paid': paid,
+      'account': account,
+      'due': due,
+      'approved': approved,
+      'campaign': campaign,
+      'exhibition': exhibition,
+      'reserve': reserve,
+    });
     final lot = byId('lots', lotId);
     available(lot, amount);
     nonnegative(unitPrice);
@@ -967,6 +1074,12 @@ class Manager extends ChangeNotifier {
     String account,
     bool approved,
   ) => commit('sale', 'تسليم طلبية', () {
+    describeCommand('deliver', {
+      'saleId': saleId,
+      'paid': paid,
+      'account': account,
+      'approved': approved,
+    });
     final sale = byId('sales', saleId);
     if (sale['status'] != 'محجوز') throw RuleViolation('الطلبية مسلمة بالفعل');
     final source = byId('lots', sale['lot']);
@@ -1015,6 +1128,7 @@ class Manager extends ChangeNotifier {
   });
   Future<void> cancelOrder(String saleId, String reason) =>
       commit('sale', 'إلغاء طلبية: $reason', () {
+        describeCommand('cancelOrder', {'saleId': saleId, 'reason': reason});
         requiredText(reason);
         final sale = byId('sales', saleId);
         if (sale['status'] != 'محجوز') throw RuleViolation('خاص طلبية محجوزة');
@@ -1210,6 +1324,12 @@ class Manager extends ChangeNotifier {
       });
   Future<void> campaign(String name, String source, String start, String end) =>
       commit('campaign', 'حملة: $name', () {
+        describeCommand('campaign', {
+          'name': name,
+          'source': source,
+          'start': start,
+          'end': end,
+        });
         requiredText(name);
         date(start);
         date(end);
@@ -1222,19 +1342,154 @@ class Manager extends ChangeNotifier {
           'end': end,
         });
       });
-  Future<void> recipe(String name, String product, String description) =>
-      commit('recipe', 'وصفة: $name', () {
-        requiredText(name);
-        requiredText(description);
-        byId('products', product);
-        rows('recipes').add({
-          'id': id(),
-          'name': name,
-          'product': product,
-          'description': description,
-          'date': today(),
-        });
+  Future<void> recipe(
+    String name,
+    String product,
+    String description, {
+    double outputQuantity = 1,
+    List<DataRow> ingredients = const [],
+  }) => commit('recipe', 'وصفة: $name', () {
+    describeCommand('recipe', {
+      'name': name,
+      'product': product,
+      'description': description,
+      'outputQuantity': outputQuantity,
+      'ingredients': ingredients,
+    });
+    requiredText(name);
+    requiredText(description);
+    byId('products', product);
+    positive(outputQuantity);
+    if (byId('products',product)['unit'] == 'قطعة' && outputQuantity % 1 != 0) throw RuleViolation('عدد نواتج الوصفة خاصو يكون صحيح');
+    final unique = <String>{};
+    for (final ingredient in ingredients) {
+      final source = ingredient['product'] as String;
+      final sourceProduct = byId('products', source);
+      positive(number(ingredient, 'quantity'));
+      if (source == product || !unique.add(source))
+        throw RuleViolation('كل مادة مرة وحدة، ومختلفة عن الصنف المعبأ');
+      if (sourceProduct['unit'] == 'قطعة' &&
+          number(ingredient, 'quantity') % 1 != 0)
+        throw RuleViolation('العبوات والقطع خاصها عدد صحيح');
+    }
+    rows('recipes').add({
+      'id': id(),
+      'name': name,
+      'product': product,
+      'description': description,
+      'outputQuantity': outputQuantity,
+      'ingredients': ingredients,
+      'date': today(),
+    });
+  });
+
+  List<DataRow> recipeInputs(String recipeId, double output) {
+    final recipe = byId('recipes', recipeId);
+    positive(output);
+    final product = byId('products', recipe['product']);
+    if (product['unit'] == 'قطعة' && output % 1 != 0)
+      throw RuleViolation('عدد العبوات النهائية خاصو يكون صحيح');
+    final ingredients = (recipe['ingredients'] as List?)?.cast<DataRow>() ?? [];
+    if (ingredients.isEmpty)
+      throw RuleViolation('هاد الوصفة نصية؛ عرف مقادير التحويل أولاً');
+    final basis = number(recipe, 'outputQuantity');
+    positive(basis);
+    final result = <DataRow>[];
+    for (final ingredient in ingredients) {
+      final sourceProduct = byId('products', ingredient['product']);
+      var needed = double.parse(
+        (number(ingredient, 'quantity') * output / basis).toStringAsFixed(6),
+      );
+      positive(needed);
+      if (sourceProduct['unit'] == 'قطعة' && needed % 1 != 0)
+        throw RuleViolation('الوصفة كتطلب جزء من عبوة؛ اختار عدد نواتج مناسب');
+      final lots = rows('lots')
+          .where(
+            (lot) =>
+                lot['product'] == ingredient['product'] &&
+                lot['location'] == workshop &&
+                number(lot, 'quantity') > 0 &&
+                ((lot['expiry'] as String).isEmpty ||
+                    (lot['expiry'] as String).compareTo(today()) >= 0),
+          )
+          .toList();
+      lots.sort((a, b) {
+        final aDate = a['expiry'] == '' ? '9999-12-31' : a['expiry'] as String;
+        final bDate = b['expiry'] == '' ? '9999-12-31' : b['expiry'] as String;
+        final comparison = aDate.compareTo(bDate);
+        return comparison == 0
+            ? (a['id'] as String).compareTo(b['id'])
+            : comparison;
       });
+      for (final lot in lots) {
+        if (needed <= 0) break;
+        final used = needed < number(lot, 'quantity')
+            ? needed
+            : number(lot, 'quantity');
+        result.add({'lot': lot['id'], 'quantity': used});
+        needed = double.parse((needed - used).toStringAsFixed(6));
+      }
+      if (needed > 0)
+        throw RuleViolation(
+          'مخزون ${sourceProduct['name']} ناقص بـ $needed ${sourceProduct['unit']}',
+        );
+    }
+    return result;
+  }
+
+  Future<void> produceFromRecipe({
+    required String recipeId,
+    required double output,
+    required String batch,
+    required String expiry,
+    required String workers,
+    required double hours,
+    int? labor,
+    int overhead = 0,
+  }) async {
+    final recipe = byId('recipes', recipeId);
+    final inputs = recipeInputs(recipeId, output);
+    final expiries =
+        inputs
+            .map((input) => byId('lots', input['lot'])['expiry'] as String)
+            .where((date) => date.isNotEmpty)
+            .toList()
+          ..sort();
+    final effectiveExpiry = expiry.isEmpty
+        ? (expiries.firstOrNull ?? '')
+        : expiry;
+    if (expiries.isNotEmpty && effectiveExpiry.compareTo(expiries.first) > 0)
+      throw RuleViolation('صلاحية الناتج ما تقدرش تفوت أقرب صلاحية للمواد');
+    await produce(
+      inputs: inputs,
+      productId: recipe['product'],
+      output: output,
+      batch: batch,
+      expiry: effectiveExpiry,
+      workers: workers,
+      hours: hours,
+      waste: 0,
+      labor: labor,
+      overhead: overhead,
+      activity: 'تعبئة',
+      estimated: false,
+      recipeSnapshot: jsonDecode(jsonEncode(recipe)) as DataRow,
+      commandOverride: {
+        'kind': 'produceFromRecipe',
+        'arguments': {
+          'recipeId': recipeId,
+          'output': output,
+          'batch': batch,
+          'expiry': expiry,
+          'workers': workers,
+          'hours': hours,
+          'labor': labor,
+          'overhead': overhead,
+        },
+      },
+    );
+  }
+
   int get revenue => rows('sales')
       .where((s) => s['status'] == 'مسلم')
       .fold(

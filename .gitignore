@@ -60,3 +60,10 @@ app.*.map.json
 # One-off extraction of the private planning document
 /tool/extract_plan.dart
 /tool/plan_extracted.txt
+
+# Device Firebase configuration and service account credentials
+/firebase_config.json
+**/*service-account*.json
+**/*serviceAccount*.json
+/.tools/
+/firebase_tests/node_modules/

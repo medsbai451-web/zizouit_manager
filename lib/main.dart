@@ -1,12 +1,36 @@
 import 'package:flutter/material.dart' hide DataRow;
 import 'package:flutter/services.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart' show FirebaseFirestore, Settings;
 
 import 'domain/manager.dart';
 import 'reports/pdf_report.dart';
 import 'storage/storage.dart' as storage;
+import 'firebase/firebase_config.dart';
+import 'firebase/auth_gate.dart';
+import 'firebase/firebase_session.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (FirebaseConfig.enabled) {
+    try {
+      await Firebase.initializeApp(options: FirebaseConfig.options);
+      FirebaseFirestore.instance.settings = const Settings(
+        persistenceEnabled: false,
+      );
+      runApp(
+        MyApp(
+          homeOverride: AuthGate(
+            builder: (manager, session) =>
+                Home(manager: manager, session: session),
+          ),
+        ),
+      );
+    } catch (e) {
+      runApp(MyApp(startupError: 'تعذر تشغيل Firebase: $e'));
+    }
+    return;
+  }
   String? initial;
   String? error;
   try {
@@ -30,9 +54,10 @@ const accent = Color(0xFFB38339);
 const accounts = ['صندوق الورشة', 'صندوق المحل', 'البنك'];
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key, this.manager, this.startupError});
+  const MyApp({super.key, this.manager, this.startupError, this.homeOverride});
   final Manager? manager;
   final String? startupError;
+  final Widget? homeOverride;
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'ZIZOUIT Manager',
@@ -75,7 +100,7 @@ class MyApp extends StatelessWidget {
               ),
             ),
           )
-        : Home(manager: manager ?? Manager(save: (_) async {})),
+        : homeOverride ?? Home(manager: manager ?? Manager(save: (_) async {})),
   );
 }
 
@@ -99,8 +124,9 @@ class FormFieldSpec {
 }
 
 class Home extends StatefulWidget {
-  const Home({super.key, required this.manager});
+  const Home({super.key, required this.manager, this.session});
   final Manager manager;
+  final FirebaseSession? session;
   @override
   State<Home> createState() => _HomeState();
 }
@@ -110,6 +136,7 @@ class _HomeState extends State<Home> {
   String section = 'اليوم';
   String search = '';
   bool get admin => m.actor == 'المدير';
+  FirebaseSession? get session => widget.session;
   final sections = <String, IconData>{
     'اليوم': Icons.space_dashboard_outlined,
     'الأصناف': Icons.category_outlined,
@@ -136,6 +163,7 @@ class _HomeState extends State<Home> {
   void initState() {
     super.initState();
     m.addListener(changed);
+    session?.addListener(changed);
   }
 
   void changed() {
@@ -145,6 +173,7 @@ class _HomeState extends State<Home> {
   @override
   void dispose() {
     m.removeListener(changed);
+    session?.removeListener(changed);
     super.dispose();
   }
 
@@ -397,12 +426,12 @@ class _HomeState extends State<Home> {
     bool secondary = false,
   }) => secondary
       ? OutlinedButton.icon(
-          onPressed: m.busy ? null : action,
+          onPressed: m.busy || session?.processing == true ? null : action,
           icon: Icon(icon, size: 20),
           label: Text(label),
         )
       : FilledButton.icon(
-          onPressed: m.busy ? null : action,
+          onPressed: m.busy || session?.processing == true ? null : action,
           icon: Icon(icon, size: 20),
           label: Text(label),
         );
@@ -539,6 +568,21 @@ class _HomeState extends State<Home> {
 
   @override
   Widget build(BuildContext context) {
+    if (session?.revoked == true)
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('الصلاحية تبدلات. خاص تسجيل الدخول من جديد.'),
+              TextButton(
+                onPressed: () => run(session!.signOut),
+                child: const Text('تسجيل الخروج'),
+              ),
+            ],
+          ),
+        ),
+      );
     final wide = MediaQuery.sizeOf(context).width >= 1000;
     final nav = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -596,10 +640,12 @@ class _HomeState extends State<Home> {
             ],
           ),
         ),
-        const Padding(
+        Padding(
           padding: EdgeInsets.all(20),
           child: Text(
-            'نسخة محلية • بلا مزامنة\nالبيانات محفوظة فهاد الجهاز',
+            session == null
+                ? 'نسخة محلية • بلا مزامنة\nالبيانات محفوظة فهاد الجهاز'
+                : 'Firebase • حساب ${m.actor}\nالعمليات كتتزامن مع التعاونية',
             style: TextStyle(color: Color(0xFFC6D8CF), height: 1.7),
           ),
         ),
@@ -642,23 +688,31 @@ class _HomeState extends State<Home> {
               ),
               SizedBox(
                 width: 125,
-                child: DropdownButton<String>(
-                  isExpanded: true,
-                  value: m.actor,
-                  items: [
-                    for (final role in roles)
-                      DropdownMenuItem(value: role, child: Text(role)),
-                  ],
-                  onChanged: m.busy
-                      ? null
-                      : (value) => setState(() {
-                          m.actor = value!;
-                          section = 'اليوم';
-                          search = '';
-                        }),
-                ),
+                child: m.authenticatedRole != null
+                    ? Text(m.actor, textAlign: TextAlign.center)
+                    : DropdownButton<String>(
+                        isExpanded: true,
+                        value: m.actor,
+                        items: [
+                          for (final role in roles)
+                            DropdownMenuItem(value: role, child: Text(role)),
+                        ],
+                        onChanged: m.busy
+                            ? null
+                            : (value) => setState(() {
+                                m.actor = value!;
+                                section = 'اليوم';
+                                search = '';
+                              }),
+                      ),
               ),
               const SizedBox(width: 8),
+              if (session != null)
+                IconButton(
+                  tooltip: 'تسجيل الخروج',
+                  onPressed: () => run(session!.signOut),
+                  icon: const Icon(Icons.logout),
+                ),
               const CircleAvatar(
                 backgroundColor: ink,
                 child: Icon(Icons.person_outline, color: Colors.white),
@@ -698,25 +752,51 @@ class _HomeState extends State<Home> {
     );
   }
 
-  Widget content() => switch (section) {
-    'الأصناف' => products(),
-    'المخزون' => inventory(),
-    'المشتريات' => purchases(),
-    'الإنتاج' => production(),
-    'المبيعات' => sales(),
-    'الموردون' => suppliers(),
-    'الديون' => debts(),
-    'المالية' => finance(),
-    'المعارض' => exhibitions(),
-    'التسويق' => marketing(),
-    'التقارير' => reports(),
-    'الإعدادات' => settings(),
-    _ => dashboard(),
-  };
+  Widget content() => !visibleSections.contains(section)
+      ? notice('ما عندكش صلاحية لهاذ الصفحة')
+      : switch (section) {
+          'الأصناف' => products(),
+          'المخزون' => inventory(),
+          'المشتريات' => purchases(),
+          'الإنتاج' => production(),
+          'المبيعات' => sales(),
+          'الموردون' => suppliers(),
+          'الديون' => debts(),
+          'المالية' => finance(),
+          'المعارض' => exhibitions(),
+          'التسويق' => marketing(),
+          'التقارير' => reports(),
+          'الإعدادات' => settings(),
+          _ => dashboard(),
+        };
   Widget dashboard() => stack([
     notice(
-      'مرحبا ${m.actor}. هادي نسخة محلية للتجربة. اختيار الاسم ماشي تسجيل دخول آمن؛ ما تدخلش بيانات حساسة قبل إعداد الخادم والصلاحيات.',
+      session == null
+          ? 'مرحبا ${m.actor}. هادي نسخة محلية للتجربة. اختيار الاسم ماشي تسجيل دخول آمن؛ ما تدخلش بيانات حساسة قبل إعداد الخادم والصلاحيات.'
+          : 'مرحبا ${m.actor}. الدور مرتبط بالحساب. البيانات المالية والديون غير متاحة إلا للمدير.',
     ),
+    if (session != null) ...[
+      notice(
+        '${session!.status ?? 'المزامنة مفعلة'}\nعمليات فالجهاز: ${session!.outbox.length} · فانتظار المعالجة: ${session!.commands.where((c) => c['status'] == 'pending').length}',
+      ),
+      for (final command
+          in session!.commands.where((c) => c['status'] == 'rejected').take(5))
+        notice(
+          'عملية ما تطبقاتش: ${command['error'] ?? 'تواصل مع المدير'}',
+          icon: Icons.warning_amber,
+        ),
+      actions([
+        button(
+          'حدث المزامنة',
+          Icons.sync,
+          () => run(() async {
+            await session!.flush();
+            await session!.refresh();
+          }),
+          secondary: true,
+        ),
+      ]),
+    ],
     if (admin)
       stats({
         'المبيعات المسلمة': money(m.revenue),
@@ -1139,16 +1219,7 @@ class _HomeState extends State<Home> {
   Widget production() => stack([
     actions([
       button('صنعت', Icons.add, produceForm),
-      button(
-        'حفظ وصفة',
-        Icons.menu_book_outlined,
-        () => form('وصفة مرجعية', [
-          field('name', 'اسم الوصفة'),
-          select('product', 'الناتج', productOptions),
-          field('description', 'المقادير والوحدات والخطوات', lines: 4),
-        ], (v) => m.recipe(v['name']!, v['product']!, v['description']!)),
-        secondary: true,
-      ),
+      button('حفظ وصفة', Icons.menu_book_outlined, recipeForm, secondary: true),
     ]),
     if (m.rows('production').isEmpty)
       empty('سجل أول دفعة إنتاج فعلية', Icons.spa_outlined),
@@ -1161,10 +1232,82 @@ class _HomeState extends State<Home> {
     for (final r in m.rows('recipes'))
       tile(
         'وصفة: ${r['name']}',
-        '${productName(r['product'])}\n${r['description']}',
+        '${productName(r['product'])}\n${recipeSummary(r)}\n${r['description']}',
         icon: Icons.menu_book_outlined,
+        controls: [
+          if ((r['ingredients'] as List?)?.isNotEmpty == true)
+            button(
+              'عبأت بالوصفة',
+              Icons.auto_awesome,
+              () => conversionForm(r),
+              secondary: true,
+            ),
+        ],
       ),
   ]);
+  String recipeSummary(DataRow recipe) =>
+      'لكل ${recipe['outputQuantity'] ?? 1} من الناتج:\n${((recipe['ingredients'] as List?) ?? []).map((i) => '${i['quantity']} ${m.byId('products', i['product'])['unit']} من ${productName(i['product'])}').join('\n')}';
+  void recipeForm() => form(
+    'وصفة تحويل وتعبئة',
+    [
+      field('name', 'اسم الوصفة'),
+      select('product', 'الصنف المعبأ للبيع', productOptions),
+      field('basis', 'عدد النواتج في الوصفة', initial: '1', numeric: true),
+      for (final p in m.rows('products'))
+        field(
+          'ingredient_${p['id']}',
+          'كمية ${productName(p['id'])} لكل دفعة وصفة',
+          optional: true,
+          numeric: true,
+        ),
+      field('description', 'خطوات وملاحظات', optional: true, lines: 3),
+    ],
+    (v) {
+      final ingredients = <DataRow>[
+        for (final p in m.rows('products'))
+          if (v['ingredient_${p['id']}']!.isNotEmpty)
+            {
+              'product': p['id'],
+              'quantity': quantity(v['ingredient_${p['id']}']!),
+            },
+      ];
+      if (ingredients.isEmpty)
+        throw RuleViolation('حدد المادة السائبة ومواد العبوة المطلوبة');
+      return m.recipe(
+        v['name']!,
+        v['product']!,
+        v['description']!.trim().isEmpty
+            ? 'تعبئة حسب المقادير المسجلة'
+            : v['description']!,
+        outputQuantity: quantity(v['basis']!),
+        ingredients: ingredients,
+      );
+    },
+    help: 'عرف المادة السائبة والعبوات كأصناف مستقلة. مثال لكل قرعة عسل 250غ: 0.25 كلغ عسل سائب + 1 قرعة + 1 غطاء + 1 ملصق. المقادير بوحدة كل صنف؛ ما كنبدلوش الوحدات بالتخمين.',
+  );
+  void conversionForm(DataRow recipe) => form(
+    'عبأت: ${recipe['name']}',
+    [
+      amountField,
+      ...batchFields,
+      field('workers', 'العاملات المشاركات'),
+      field('hours', 'الساعات الفعلية', numeric: true),
+      moneyField('labor', 'تكلفة العمل المخصصة', optional: true),
+      moneyField('overhead', 'مصاريف مخصصة', initial: '0'),
+    ],
+    (v) => m.produceFromRecipe(
+      recipeId: recipe['id'],
+      output: quantity(v['quantity']!),
+      batch: v['batch']!,
+      expiry: v['expiry']!,
+      workers: v['workers']!,
+      hours: quantity(v['hours']!),
+      labor: v['labor']!.isEmpty ? null : cents(v['labor']!),
+      overhead: cents(v['overhead']!),
+    ),
+    help:
+        '${recipeSummary(recipe)}\nدخل عدد العبوات الفعلي. المواد والتغليف كيتخصمو تلقائياً من دفعات الورشة الأقرب للصلاحية. الصلاحية الفارغة كتتورث من أقرب مادة، والناتج كيدخل مخزون الورشة.',
+  );
   void saleForm() => form(
     'بعت / حجزت طلبية',
     [
@@ -1753,8 +1896,31 @@ class _HomeState extends State<Home> {
     ),
   );
   Widget settings() => stack([
+    if (session != null) ...[
+      notice(
+        'Firebase مرتبط بحسابك. التعيين بالأرقام UID كيعطي صلاحيات الخادم، وليس اختياراً محلياً. عمليات العاملات كتتعالج آلياً ملي جهاز المدير متصل.',
+      ),
+      actions([
+        button(
+          'عين صلاحية حساب',
+          Icons.manage_accounts,
+          () => form('تعيين دور', [
+            field('uid', 'UID من شاشة حساب الشخص'),
+            select('role', 'الدور', options(roles)),
+          ], (v) => session!.setMember(v['uid']!, v['role']!)),
+        ),
+        button(
+          'حدث بيانات الخادم',
+          Icons.sync,
+          () => run(session!.refresh),
+          secondary: true,
+        ),
+      ]),
+    ],
     notice(
-      'تخزين محلي فقط. تبديل الأدوار للعرض والتجربة وليس حماية للبيانات. صلاحيات الخادم، تسجيل الدخول، التشفير والمزامنة لم تُهيأ بعد. بيانات الويب فهاد المتصفح؛ حذف بيانات الموقع كيحذف النسخة المحلية.',
+      session == null
+          ? 'تخزين محلي فقط. تبديل الأدوار للعرض والتجربة وليس حماية للبيانات. فعل إعداد Firebase للولوج والصلاحيات والمزامنة.'
+          : 'البيانات المالية والديون محفوظة في وثيقة خاصة بالمدير. النسخة المحلية للحساب كتتمسح عند الخروج؛ ما تدخلش مفاتيح الخدمة أو كلمات السر فالنسخ الاحتياطية.',
     ),
     actions([
       button(
